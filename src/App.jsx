@@ -318,6 +318,7 @@ function Dashboard({ onSignOut }) {
   const [recentConnectionsLoading, setRecentConnectionsLoading] = useState(false);
   const [productSuggestions, setProductSuggestions] = useState([]);
   const [productSearchTimeout, setProductSearchTimeout] = useState(null);
+  const [showProductModal, setShowProductModal] = useState(false);
   const [transferProductSuggestions, setTransferProductSuggestions] = useState([]);
   const [transferProductTimeout, setTransferProductTimeout] = useState(null);
   const [idProofUploading, setIdProofUploading] = useState(false);
@@ -395,8 +396,14 @@ function Dashboard({ onSignOut }) {
   const connectionFinancials = useMemo(() => {
     const deposit = Number(newConnectionForm.depositAmount) || 0;
     const gst = Number(newConnectionForm.gstAmount) || 0;
-    return { deposit, gst, total: deposit + gst };
-  }, [newConnectionForm.depositAmount, newConnectionForm.gstAmount]);
+    const productsTotal = newConnectionForm.selectedProducts.reduce((sum, p) => sum + Number(p.price || 0), 0);
+    return { 
+      deposit, 
+      gst, 
+      productsTotal,
+      total: deposit + gst + productsTotal 
+    };
+  }, [newConnectionForm.depositAmount, newConnectionForm.gstAmount, newConnectionForm.selectedProducts]);
 
   const iocDriverOptions = useMemo(() => {
     const seen = new Set();
@@ -412,6 +419,10 @@ function Dashboard({ onSignOut }) {
 
   useEffect(() => {
     const loadCustomers = async () => {
+      if (!customerSearch.trim()) {
+        setCustomers([]);
+        return;
+      }
       setCustomersLoading(true);
       try {
         const data = await fetchCustomers(customerSearch.trim());
@@ -672,8 +683,12 @@ function Dashboard({ onSignOut }) {
     const load = async () => {
       setDashboardLoading(true);
       try {
-        const data = await fetchDashboardOverview();
+        const [data, otpSummaryData] = await Promise.all([
+          fetchDashboardOverview(),
+          fetchIocOtpSummary(),
+        ]);
         setDashboardOverview(data);
+        setIocOtpSummary(otpSummaryData);
       } catch (error) {
         setErrorMessage(error?.response?.data?.message || "Failed to load dashboard overview.");
       } finally {
@@ -1019,11 +1034,6 @@ function Dashboard({ onSignOut }) {
 
     if (productSearchTimeout) clearTimeout(productSearchTimeout);
 
-    if (!value.trim()) {
-      setProductSuggestions([]);
-      return;
-    }
-
     const timeout = setTimeout(async () => {
       try {
         const rows = await searchConnectionProducts(value.trim());
@@ -1150,6 +1160,7 @@ function Dashboard({ onSignOut }) {
         })),
         depositAmount: connectionFinancials.deposit,
         gstAmount: connectionFinancials.gst,
+        productsTotal: connectionFinancials.productsTotal,
         totalAmount: connectionFinancials.total,
       });
       setSuccessMessage("New connection sent successfully.");
@@ -1554,8 +1565,8 @@ function Dashboard({ onSignOut }) {
 
               <article className="support-kpi-card">
                 <div>
-                  <p className="support-kpi-label">Name Change Requests</p>
-                  <strong>{dashboardOverview.cards.nameChangeRequests}</strong>
+                  <p className="support-kpi-label">IOC- OTPs</p>
+                  <strong>{iocOtpSummary.todayReceived}</strong>
                 </div>
                 <span className="support-kpi-icon sky">{DASHBOARD_CARD_ICONS.nameChangeRequests}</span>
               </article>
@@ -1811,7 +1822,7 @@ function Dashboard({ onSignOut }) {
                 {customersLoading ? <p className="muted">Loading customers...</p> : null}
 
                 <div className="customer-search-results">
-                  {customers.map((customer) => (
+                  {customerSearch.trim() ? customers.map((customer) => (
                     <button
                       key={customer.id}
                       type="button"
@@ -1828,7 +1839,7 @@ function Dashboard({ onSignOut }) {
                       </div>
                       <span className="result-icon">+</span>
                     </button>
-                  ))}
+                  )) : null}
                 </div>
 
                 <div className="details-grid">
@@ -2009,17 +2020,15 @@ function Dashboard({ onSignOut }) {
                 {newConnectionForm.idProofUrl ? <p className="upload-success">ID proof uploaded successfully.</p> : null}
               </div>
 
-              <div className="new-connection-fields">
+                <div className="new-connection-fields">
                 <label>Product</label>
-                <div className="autosuggest-wrap">
-                  <input
-                    name="productDetails"
-                    value={newConnectionForm.productDetails}
-                    onChange={(e) => handleProductSearch(e.target.value)}
-                    placeholder="Search product by name or type…"
-                    autoComplete="off"
-                    onFocus={async () => {
-                      if (!newConnectionForm.productDetails.trim()) {
+                <div>
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={async () => {
+                      setShowProductModal(true);
+                      if (!productSuggestions.length) {
                         try {
                           const rows = await searchConnectionProducts("");
                           setProductSuggestions(rows);
@@ -2028,23 +2037,9 @@ function Dashboard({ onSignOut }) {
                         }
                       }
                     }}
-                    onBlur={() => setTimeout(() => setProductSuggestions([]), 200)}
-                  />
-                  {productSuggestions.length ? (
-                    <div className="autosuggest-dropdown">
-                      {productSuggestions.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className="autosuggest-item"
-                          onClick={() => handleSelectProduct(item)}
-                        >
-                          <strong>{item.name}</strong>
-                          <span>{item.type} — ₹{Number(item.price || 0).toFixed(2)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
+                  >
+                    + Select Product
+                  </button>
                 </div>
                 {newConnectionForm.selectedProducts.length ? (
                   <div className="selected-product-chips">
@@ -2077,9 +2072,19 @@ function Dashboard({ onSignOut }) {
 
               <div className="amount-row">
                 <label>Final Amount</label>
-                <div className="total-payable-box">
-                  <span>Total payable</span>
-                  <strong>₹ {connectionFinancials.total.toFixed(2)}</strong>
+                <div className="total-payable-box" style={{ flexDirection: "column", alignItems: "stretch", gap: "8px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>Deposit & GST</span>
+                    <span>₹ {(connectionFinancials.deposit + connectionFinancials.gst).toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #e0e0e0", paddingBottom: "8px" }}>
+                    <span>Products Total</span>
+                    <span>₹ {connectionFinancials.productsTotal.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: "4px" }}>
+                    <span>Total payable</span>
+                    <strong>₹ {connectionFinancials.total.toFixed(2)}</strong>
+                  </div>
                 </div>
               </div>
 
@@ -2089,6 +2094,77 @@ function Dashboard({ onSignOut }) {
                 </button>
               </div>
             </article>
+
+            {showProductModal ? (
+              <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowProductModal(false)}>
+                <section
+                  className="assign-driver-modal"
+                  role="dialog"
+                  aria-modal="true"
+                  style={{ maxWidth: "600px", width: "100%" }}
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <div className="modal-title-row">
+                    <div>
+                      <h2 id="product-modal-title">Select Product</h2>
+                    </div>
+                    <button type="button" className="modal-close-btn" onClick={() => setShowProductModal(false)}>
+                      X
+                    </button>
+                  </div>
+
+                  <input
+                    type="text"
+                    placeholder="Search product by name or type..."
+                    value={newConnectionForm.productDetails || ""}
+                    onChange={(e) => handleProductSearch(e.target.value)}
+                    style={{ width: "100%", padding: "10px", marginBottom: "16px", border: "1px solid #ccc", borderRadius: "4px" }}
+                  />
+
+                  <div className="product-table-wrapper" style={{ maxHeight: "400px", overflowY: "auto" }}>
+                    <table className="product-table" style={{ width: "100%", textAlign: "left", borderCollapse: "collapse" }}>
+                      <thead style={{ position: "sticky", top: 0, backgroundColor: "#fff", zIndex: 1 }}>
+                        <tr>
+                          <th style={{ padding: "10px", borderBottom: "2px solid #eee" }}>Name</th>
+                          <th style={{ padding: "10px", borderBottom: "2px solid #eee" }}>Type</th>
+                          <th style={{ padding: "10px", borderBottom: "2px solid #eee" }}>Price (₹)</th>
+                          <th style={{ padding: "10px", borderBottom: "2px solid #eee" }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {productSuggestions.map((item) => (
+                          <tr key={item.id} style={{ borderBottom: "1px solid #eee" }}>
+                            <td style={{ padding: "10px" }}>{item.name}</td>
+                            <td style={{ padding: "10px" }}>{item.type}</td>
+                            <td style={{ padding: "10px" }}>{Number(item.price || 0).toFixed(2)}</td>
+                            <td style={{ padding: "10px" }}>
+                              <button
+                                type="button"
+                                className="secondary-btn"
+                                style={{ padding: "4px 8px", fontSize: "0.85rem" }}
+                                onClick={() => {
+                                  handleSelectProduct(item);
+                                  setShowProductModal(false);
+                                }}
+                              >
+                                Select
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {!productSuggestions.length && (
+                          <tr>
+                            <td colSpan="4" style={{ padding: "20px", textAlign: "center", color: "#666" }}>
+                              No products found.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+            ) : null}
 
             <aside className="recent-applications-card">
               <h4>Recent Applications</h4>
