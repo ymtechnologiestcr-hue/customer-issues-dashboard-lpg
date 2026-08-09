@@ -35,6 +35,7 @@ import {
   AUTH_USER_KEY,
 } from "./services/complaintsApi";
 import Login from "./components/Login";
+import BulkCustomerUpload from "./components/BulkCustomerUpload";
 
 const SIDEBAR_ITEMS = [
   "Dashboard",
@@ -2753,6 +2754,12 @@ function Dashboard({ onSignOut }) {
                 <button type="button" className="secondary-btn" onClick={handleClearCustomerSelection}>
                   Clear
                 </button>
+              </div>
+
+              <div style={{ marginBottom: "16px" }}>
+                <BulkCustomerUpload onUploadComplete={() => {
+                  setCustomerDirectorySearch((prev) => (prev.endsWith(" ") ? prev.trim() : prev + " "));
+                }} />
               </div>
 
               <input

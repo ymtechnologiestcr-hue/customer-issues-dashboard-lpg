@@ -250,3 +250,16 @@ export const updateTransferApprovalStatus = async (transferId, approvalStatus) =
   const response = await api.patch(`/customer-transfers/${transferId}/approval`, { approvalStatus });
   return response.data;
 };
+
+export const uploadBulkCustomers = async (file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await api.post("/upload/bulk-customers", formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+
+  return response.data;
+};
