@@ -259,6 +259,7 @@ export const uploadBulkCustomers = async (file) => {
     headers: {
       "Content-Type": "multipart/form-data",
     },
+    timeout: 300000, // 5 minutes timeout for bulk upload
   });
 
   return response.data;
