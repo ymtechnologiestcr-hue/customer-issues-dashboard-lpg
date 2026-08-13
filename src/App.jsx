@@ -2673,6 +2673,7 @@ function Dashboard({ onSignOut }) {
                       <th>Driver</th>
                       <th>Customer</th>
                       <th>Consumer #</th>
+                      <th>Category</th>
                       <th>OTP</th>
                       <th>Status</th>
                       <th>Action</th>
@@ -2681,13 +2682,13 @@ function Dashboard({ onSignOut }) {
                   <tbody>
                     {iocOtpsLoading ? (
                       <tr>
-                        <td colSpan={7}>Loading OTPs...</td>
+                        <td colSpan={8}>Loading OTPs...</td>
                       </tr>
                     ) : null}
 
                     {!iocOtpsLoading && !iocOtps.length ? (
                       <tr>
-                        <td colSpan={7}>No OTPs found.</td>
+                        <td colSpan={8}>No OTPs found.</td>
                       </tr>
                     ) : null}
 
@@ -2700,6 +2701,7 @@ function Dashboard({ onSignOut }) {
                               <td>{item.driver_name || "-"}</td>
                               <td>{item.customer_name || "-"}</td>
                               <td>{item.consumer_number || "-"}</td>
+                              <td>{item.category || "-"}</td>
                               <td>
                                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                                   <strong>{item.otp}</strong>
