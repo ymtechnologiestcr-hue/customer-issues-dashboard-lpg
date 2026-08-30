@@ -388,7 +388,7 @@ function Dashboard({ onSignOut }) {
       const currentStatus = item.workflow_status || item.status;
       const statusMatched =
         statusFilter === "ALL" || String(currentStatus || "").toUpperCase() === statusFilter;
-      const searchText = `${item.customer_name || ""} ${item.complaint_code || ""} ${item.customer_phone || ""} ${item.description || ""}`.toLowerCase();
+      const searchText = `${item.customer_name || ""} ${item.consumer_number || ""} ${item.complaint_code || ""} ${item.customer_phone || ""} ${item.description || ""}`.toLowerCase();
       const searchMatched = !complaintsSearch || searchText.includes(complaintsSearch.toLowerCase());
       return statusMatched && searchMatched;
     });
