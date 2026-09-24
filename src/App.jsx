@@ -260,21 +260,26 @@ const getDashboardStatusClass = (status) => {
 const mapTransferLookup = (record) => {
   if (!record) return null;
 
-  // Do NOT include existingName here — that field is owned by the autosuggest input.
   return {
     existingCustomerId: record.existing_customer_id || record.customer_id || record.id || null,
+    existingName: record.name || record.existing_name || record.customer_name || record.customerName || "",
     existingCustomerPhone: record.existing_phone || record.phone || record.mobile_number || "",
     existingProductDetails:
       record.existing_product_details || record.product_details || record.connection_details || record.items || "",
+    ...(record.depositLiability !== undefined && record.depositLiability !== null
+      ? { depositLiability: String(record.depositLiability) }
+      : record.deposit_liability !== undefined && record.deposit_liability !== null
+      ? { depositLiability: String(record.deposit_liability) }
+      : {}),
   };
 };
 
 const mapNameChangeLookup = (record) => {
   if (!record) return null;
 
-  // Do NOT include existingName here — that field is owned by the autosuggest input.
   return {
     existingCustomerId: record.existing_customer_id || record.customer_id || record.id || null,
+    existingName: record.name || record.existing_name || record.customer_name || record.customerName || "",
     existingCustomerPhone: record.existing_phone || record.phone || record.mobile_number || "",
   };
 };
@@ -282,9 +287,9 @@ const mapNameChangeLookup = (record) => {
 const mapPenaltyLookup = (record) => {
   if (!record) return null;
 
-  // Do NOT include customerName here — that field is owned by the autosuggest input.
   return {
-    customerId: record.id || record.customer_id || null,
+    customerId: record.customerId || record.customer_id || record.id || null,
+    customerName: record.name || record.customerName || record.customer_name || record.existing_name || "",
     consumerNumber: record.consumerNumber || record.consumer_number || "",
   };
 };
@@ -541,9 +546,12 @@ function Dashboard({ onSignOut }) {
             ...previous,
             ...mapped,
           }));
+          setErrorMessage("");
         }
       } catch (error) {
-        setErrorMessage(error?.response?.data?.message || "Failed to lookup customer for transfer.");
+        if (error?.response?.status !== 404) {
+          setErrorMessage(error?.response?.data?.message || "Failed to lookup customer for transfer.");
+        }
       } finally {
         setTransferLookupLoading(false);
       }
@@ -566,9 +574,12 @@ function Dashboard({ onSignOut }) {
             ...previous,
             ...mapped,
           }));
+          setErrorMessage("");
         }
       } catch (error) {
-        setErrorMessage(error?.response?.data?.message || "Failed to lookup customer for name change.");
+        if (error?.response?.status !== 404) {
+          setErrorMessage(error?.response?.data?.message || "Failed to lookup customer for name change.");
+        }
       } finally {
         setNameChangeLookupLoading(false);
       }
@@ -591,6 +602,7 @@ function Dashboard({ onSignOut }) {
             ...previous,
             ...mapped,
           }));
+          setErrorMessage("");
         }
       } catch (error) {
         if (error?.response?.status !== 404) {
@@ -973,7 +985,13 @@ function Dashboard({ onSignOut }) {
     const { name, value } = event.target;
     setTransferForm((previous) => {
       const next = { ...previous, [name]: value };
-      if (name === "consumerNumber" || name === "existingName") {
+      if (name === "consumerNumber") {
+        next.existingCustomerId = null;
+        next.existingProductDetails = "";
+        if (!value.trim()) {
+          next.existingName = "";
+        }
+      } else if (name === "existingName") {
         next.existingCustomerId = null;
         next.existingProductDetails = "";
       }
@@ -985,7 +1003,13 @@ function Dashboard({ onSignOut }) {
     const { name, value } = event.target;
     setNameChangeForm((previous) => {
       const next = { ...previous, [name]: value };
-      if (name === "consumerNumber" || name === "existingName") {
+      if (name === "consumerNumber") {
+        next.existingCustomerId = null;
+        next.existingCustomerPhone = "";
+        if (!value.trim()) {
+          next.existingName = "";
+        }
+      } else if (name === "existingName") {
         next.existingCustomerId = null;
         next.existingCustomerPhone = "";
       }
@@ -1002,7 +1026,12 @@ function Dashboard({ onSignOut }) {
         [name]: value,
       };
 
-      if (name === "consumerNumber" || name === "customerName") {
+      if (name === "consumerNumber") {
+        next.customerId = null;
+        if (!value.trim()) {
+          next.customerName = "";
+        }
+      } else if (name === "customerName") {
         next.customerId = null;
       }
 
