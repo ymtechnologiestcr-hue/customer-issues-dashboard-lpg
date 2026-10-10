@@ -23,6 +23,11 @@ import {
   updateNameChangeApprovalStatus,
   uploadSupportingDocument,
   searchConnectionProducts,
+  fetchPrStockSummary,
+  fetchSalesReport,
+  fetchCustomerMovementReport,
+  fetchComplaintsReport,
+  fetchOtpVerificationReport,
 } from "./services/complaintsApi";
 import {
   addIocOtpManual,
@@ -177,6 +182,7 @@ const ISSUE_OPTIONS = [
 const DEFAULT_NEW_CONNECTION_FORM = {
   customerName: "",
   mobileNumber: "",
+  consumerNumber: "",
   address: "",
   idProofDetails: "",
   idProofUrl: "",
@@ -192,6 +198,8 @@ const DEFAULT_TRANSFER_FORM = {
   consumerNumber: "",
   existingName: "",
   existingCustomerId: null,
+  existingCustomerPhone: "",
+  existingCustomerAddress: "",
   existingProductDetails: "",
   newCustomerName: "",
   newCustomerMobile: "",
@@ -209,8 +217,11 @@ const DEFAULT_NAME_CHANGE_FORM = {
   existingName: "",
   existingCustomerId: null,
   existingCustomerPhone: "",
+  existingCustomerAddress: "",
   newName: "",
-  serviceFee: "",
+  serviceFee: "50",
+  isSameAddress: true,
+  newAddress: "",
   documentUrl: "",
   documentLabel: "",
 };
@@ -219,8 +230,10 @@ const DEFAULT_PR_PENALTY_FORM = {
   consumerNumber: "",
   customerName: "",
   customerId: null,
-  penaltyReason: "",
-  penaltyAmount: "100",
+  transactionType: "REPLACEMENT",
+  quantity: "1",
+  penaltyReason: "Defective PR replacement",
+  penaltyAmount: "0",
 };
 
 const normalizeStatus = (status) => String(status || "PENDING").replaceAll("_", " ");
@@ -260,31 +273,38 @@ const getDashboardStatusClass = (status) => {
 const mapTransferLookup = (record) => {
   if (!record) return null;
 
-  // Do NOT include existingName here — that field is owned by the autosuggest input.
   return {
     existingCustomerId: record.existing_customer_id || record.customer_id || record.id || null,
+    existingName: record.name || record.existing_name || record.customer_name || record.customerName || "",
     existingCustomerPhone: record.existing_phone || record.phone || record.mobile_number || "",
+    existingCustomerAddress: record.address || record.customer_address || "",
     existingProductDetails:
       record.existing_product_details || record.product_details || record.connection_details || record.items || "",
+    ...(record.depositLiability !== undefined && record.depositLiability !== null
+      ? { depositLiability: String(record.depositLiability) }
+      : record.deposit_liability !== undefined && record.deposit_liability !== null
+      ? { depositLiability: String(record.deposit_liability) }
+      : {}),
   };
 };
 
 const mapNameChangeLookup = (record) => {
   if (!record) return null;
 
-  // Do NOT include existingName here — that field is owned by the autosuggest input.
   return {
     existingCustomerId: record.existing_customer_id || record.customer_id || record.id || null,
+    existingName: record.name || record.existing_name || record.customer_name || record.customerName || "",
     existingCustomerPhone: record.existing_phone || record.phone || record.mobile_number || "",
+    existingCustomerAddress: record.address || "",
   };
 };
 
 const mapPenaltyLookup = (record) => {
   if (!record) return null;
 
-  // Do NOT include customerName here — that field is owned by the autosuggest input.
   return {
-    customerId: record.id || record.customer_id || null,
+    customerId: record.customerId || record.customer_id || record.id || null,
+    customerName: record.name || record.customerName || record.customer_name || record.existing_name || "",
     consumerNumber: record.consumerNumber || record.consumer_number || "",
   };
 };
@@ -376,6 +396,18 @@ function Dashboard({ onSignOut }) {
     },
     recentComplaints: [],
   });
+
+  const [prStockSummary, setPrStockSummary] = useState({ normalPrStock: 0, defectivePrStock: 0 });
+
+  const [reportsTimeframe, setReportsTimeframe] = useState("day");
+  const [reportsStartDate, setReportsStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reportsEndDate, setReportsEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [activeReportTab, setActiveReportTab] = useState("sales");
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [salesReportData, setSalesReportData] = useState(null);
+  const [movementReportData, setMovementReportData] = useState(null);
+  const [complaintsReportData, setComplaintsReportData] = useState(null);
+  const [otpReportData, setOtpReportData] = useState(null);
 
   const [customerNameSuggestions, setCustomerNameSuggestions] = useState([]);
   const [activeSuggestionField, setActiveSuggestionField] = useState("");
@@ -541,9 +573,12 @@ function Dashboard({ onSignOut }) {
             ...previous,
             ...mapped,
           }));
+          setErrorMessage("");
         }
       } catch (error) {
-        setErrorMessage(error?.response?.data?.message || "Failed to lookup customer for transfer.");
+        if (error?.response?.status !== 404) {
+          setErrorMessage(error?.response?.data?.message || "Failed to lookup customer for transfer.");
+        }
       } finally {
         setTransferLookupLoading(false);
       }
@@ -566,9 +601,12 @@ function Dashboard({ onSignOut }) {
             ...previous,
             ...mapped,
           }));
+          setErrorMessage("");
         }
       } catch (error) {
-        setErrorMessage(error?.response?.data?.message || "Failed to lookup customer for name change.");
+        if (error?.response?.status !== 404) {
+          setErrorMessage(error?.response?.data?.message || "Failed to lookup customer for name change.");
+        }
       } finally {
         setNameChangeLookupLoading(false);
       }
@@ -591,6 +629,7 @@ function Dashboard({ onSignOut }) {
             ...previous,
             ...mapped,
           }));
+          setErrorMessage("");
         }
       } catch (error) {
         if (error?.response?.status !== 404) {
@@ -630,6 +669,54 @@ function Dashboard({ onSignOut }) {
 
     load();
   }, [activeMenu, iocOtpTab, iocOtpDate, iocOtpDriverFilter]);
+
+  const loadPrStock = async () => {
+    try {
+      const data = await fetchPrStockSummary();
+      setPrStockSummary(data);
+    } catch (_e) {}
+  };
+
+  useEffect(() => {
+    if (activeMenu === "PR Penalty") {
+      loadPrStock();
+    }
+  }, [activeMenu]);
+
+  useEffect(() => {
+    if (activeMenu !== "Reports") return;
+
+    const loadReports = async () => {
+      setReportsLoading(true);
+      try {
+        const params = {
+          timeframe: reportsTimeframe,
+          startDate: reportsTimeframe === "custom" ? reportsStartDate : undefined,
+          endDate: reportsTimeframe === "custom" ? reportsEndDate : undefined,
+        };
+
+        if (activeReportTab === "sales") {
+          const data = await fetchSalesReport(params);
+          setSalesReportData(data);
+        } else if (activeReportTab === "movement") {
+          const data = await fetchCustomerMovementReport(params);
+          setMovementReportData(data);
+        } else if (activeReportTab === "complaints") {
+          const data = await fetchComplaintsReport(params);
+          setComplaintsReportData(data);
+        } else if (activeReportTab === "otp") {
+          const data = await fetchOtpVerificationReport(params);
+          setOtpReportData(data);
+        }
+      } catch (error) {
+        setErrorMessage(error?.response?.data?.message || "Failed to load report data.");
+      } finally {
+        setReportsLoading(false);
+      }
+    };
+
+    loadReports();
+  }, [activeMenu, activeReportTab, reportsTimeframe, reportsStartDate, reportsEndDate]);
 
   useEffect(() => {
     if (activeMenu !== "Customers") return;
@@ -973,7 +1060,13 @@ function Dashboard({ onSignOut }) {
     const { name, value } = event.target;
     setTransferForm((previous) => {
       const next = { ...previous, [name]: value };
-      if (name === "consumerNumber" || name === "existingName") {
+      if (name === "consumerNumber") {
+        next.existingCustomerId = null;
+        next.existingProductDetails = "";
+        if (!value.trim()) {
+          next.existingName = "";
+        }
+      } else if (name === "existingName") {
         next.existingCustomerId = null;
         next.existingProductDetails = "";
       }
@@ -985,7 +1078,13 @@ function Dashboard({ onSignOut }) {
     const { name, value } = event.target;
     setNameChangeForm((previous) => {
       const next = { ...previous, [name]: value };
-      if (name === "consumerNumber" || name === "existingName") {
+      if (name === "consumerNumber") {
+        next.existingCustomerId = null;
+        next.existingCustomerPhone = "";
+        if (!value.trim()) {
+          next.existingName = "";
+        }
+      } else if (name === "existingName") {
         next.existingCustomerId = null;
         next.existingCustomerPhone = "";
       }
@@ -1002,7 +1101,12 @@ function Dashboard({ onSignOut }) {
         [name]: value,
       };
 
-      if (name === "consumerNumber" || name === "customerName") {
+      if (name === "consumerNumber") {
+        next.customerId = null;
+        if (!value.trim()) {
+          next.customerName = "";
+        }
+      } else if (name === "customerName") {
         next.customerId = null;
       }
 
@@ -1149,6 +1253,7 @@ function Dashboard({ onSignOut }) {
       await createNewConnection({
         customerName: newConnectionForm.customerName,
         mobileNumber: newConnectionForm.mobileNumber,
+        consumerNumber: newConnectionForm.consumerNumber.trim() || undefined,
         address: newConnectionForm.address,
         idProofDetails: newConnectionForm.idProofDetails,
         idProofUrl: newConnectionForm.idProofUrl,
@@ -1164,7 +1269,7 @@ function Dashboard({ onSignOut }) {
         productsTotal: connectionFinancials.productsTotal,
         totalAmount: connectionFinancials.total,
       });
-      setSuccessMessage("New connection sent successfully.");
+      setSuccessMessage("New connection sent to cashier & customer registered successfully.");
       setNewConnectionForm(DEFAULT_NEW_CONNECTION_FORM);
       setProductSuggestions([]);
       setRecentConnections(await fetchRecentConnections());
@@ -1172,6 +1277,78 @@ function Dashboard({ onSignOut }) {
       setErrorMessage(error?.response?.data?.message || "Failed to send new connection.");
     } finally {
       setConnectionSubmitting(false);
+    }
+  };
+
+  const triggerTransferLookup = async () => {
+    const num = transferForm.consumerNumber.trim();
+    if (!num) {
+      setErrorMessage("Please enter a Consumer Number to search.");
+      return;
+    }
+    setTransferLookupLoading(true);
+    setErrorMessage("");
+    try {
+      const record = await lookupTransferCustomer({ consumerNumber: num });
+      const mapped = mapTransferLookup(record);
+      if (mapped && mapped.existingCustomerId) {
+        setTransferForm((prev) => ({ ...prev, ...mapped }));
+        setSuccessMessage(`Found customer: ${mapped.existingName}`);
+      } else {
+        setErrorMessage(`No customer found with Consumer Number: ${num}`);
+      }
+    } catch (error) {
+      setErrorMessage(error?.response?.data?.message || "Customer not found for transfer.");
+    } finally {
+      setTransferLookupLoading(false);
+    }
+  };
+
+  const triggerNameChangeLookup = async () => {
+    const num = nameChangeForm.consumerNumber.trim();
+    if (!num) {
+      setErrorMessage("Please enter a Consumer Number to search.");
+      return;
+    }
+    setNameChangeLookupLoading(true);
+    setErrorMessage("");
+    try {
+      const record = await lookupNameChangeCustomer({ consumerNumber: num });
+      const mapped = mapNameChangeLookup(record);
+      if (mapped && mapped.existingCustomerId) {
+        setNameChangeForm((prev) => ({ ...prev, ...mapped }));
+        setSuccessMessage(`Found customer: ${mapped.existingName}`);
+      } else {
+        setErrorMessage(`No customer found with Consumer Number: ${num}`);
+      }
+    } catch (error) {
+      setErrorMessage(error?.response?.data?.message || "Customer not found for name change.");
+    } finally {
+      setNameChangeLookupLoading(false);
+    }
+  };
+
+  const triggerPenaltyLookup = async () => {
+    const num = prPenaltyForm.consumerNumber.trim();
+    if (!num) {
+      setErrorMessage("Please enter a Consumer Number to search.");
+      return;
+    }
+    setPrPenaltyLookupLoading(true);
+    setErrorMessage("");
+    try {
+      const record = await lookupPenaltyCustomer({ consumerNumber: num });
+      const mapped = mapPenaltyLookup(record);
+      if (mapped && mapped.customerId) {
+        setPrPenaltyForm((prev) => ({ ...prev, ...mapped }));
+        setSuccessMessage(`Found customer: ${mapped.customerName}`);
+      } else {
+        setErrorMessage(`No customer found with Consumer Number: ${num}`);
+      }
+    } catch (error) {
+      setErrorMessage(error?.response?.data?.message || "Customer not found.");
+    } finally {
+      setPrPenaltyLookupLoading(false);
     }
   };
 
@@ -1222,6 +1399,10 @@ function Dashboard({ onSignOut }) {
       setErrorMessage("New name is required.");
       return;
     }
+    if (!nameChangeForm.isSameAddress && !nameChangeForm.newAddress.trim()) {
+      setErrorMessage("Please enter the new address or check Same Address.");
+      return;
+    }
     if (!nameChangeForm.documentUrl) {
       setErrorMessage("Please upload the supporting document.");
       return;
@@ -1235,6 +1416,8 @@ function Dashboard({ onSignOut }) {
         newName: nameChangeForm.newName,
         serviceFee: Number(nameChangeForm.serviceFee) || 0,
         documentUrl: nameChangeForm.documentUrl,
+        isSameAddress: nameChangeForm.isSameAddress,
+        address: nameChangeForm.isSameAddress ? undefined : nameChangeForm.newAddress.trim(),
       });
       setSuccessMessage("Name change request created successfully.");
       setNameChangeForm(DEFAULT_NAME_CHANGE_FORM);
@@ -1248,18 +1431,18 @@ function Dashboard({ onSignOut }) {
 
   const handleRecordPenalty = async () => {
     if (!prPenaltyForm.customerId) {
-      setErrorMessage("Please enter valid consumer number or customer name.");
+      setErrorMessage("Please enter valid consumer number or select customer.");
       return;
     }
 
     if (!prPenaltyForm.penaltyReason.trim()) {
-      setErrorMessage("Penalty reason is required.");
+      setErrorMessage("Reason is required.");
       return;
     }
 
     const amount = Number(prPenaltyForm.penaltyAmount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setErrorMessage("Penalty amount must be greater than 0.");
+    if (!Number.isFinite(amount) || amount < 0) {
+      setErrorMessage("Amount must be 0 or greater.");
       return;
     }
 
@@ -1271,13 +1454,20 @@ function Dashboard({ onSignOut }) {
         customerId: prPenaltyForm.customerId,
         penaltyReason: prPenaltyForm.penaltyReason,
         penaltyAmount: amount,
+        transactionType: prPenaltyForm.transactionType,
+        quantity: Number(prPenaltyForm.quantity) || 1,
       });
 
-      setSuccessMessage("Penalty recorded successfully.");
+      setSuccessMessage(
+        prPenaltyForm.transactionType === "REPLACEMENT"
+          ? "PR replacement recorded successfully (Normal PR -1, Defective PR +1)."
+          : "PR penalty recorded successfully (Normal PR -1)."
+      );
       setPrPenaltyForm(DEFAULT_PR_PENALTY_FORM);
       setRecentPenalties(await fetchRecentPenalties());
+      await loadPrStock();
     } catch (error) {
-      setErrorMessage(error?.response?.data?.message || "Failed to record penalty.");
+      setErrorMessage(error?.response?.data?.message || "Failed to record penalty/replacement.");
     } finally {
       setPrPenaltySubmitting(false);
     }
@@ -1392,7 +1582,7 @@ function Dashboard({ onSignOut }) {
     }
 
     // Prepare CSV header
-    const headers = ["Date", "Driver", "Customer", "Consumer number", "OTP", "Status", "Sent At"];
+    const headers = ["Date", "Driver", "Customer", "Consumer number", "Item Name", "Quantity", "Settlement", "OTP", "Status", "Sent At"];
     
     // Prepare CSV rows
     const rows = iocOtps.map((item) => [
@@ -1400,6 +1590,9 @@ function Dashboard({ onSignOut }) {
       item.driver_name || "-",
       item.customer_name || "-",
       item.consumer_number || "-",
+      item.item_name || "14.2 KG Domestic",
+      item.quantity || 1,
+      item.settlement || "Direct",
       item.otp || "",
       (String(item.status || "PENDING").toUpperCase() === "PENDING" ? "Pending" : "Sent"),
       item.created_at || "",
@@ -1411,7 +1604,6 @@ function Dashboard({ onSignOut }) {
       ...rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")),
     ].join("\n");
 
-    // Create blob and download
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
@@ -1425,6 +1617,117 @@ function Dashboard({ onSignOut }) {
     document.body.removeChild(link);
     
     setSuccessMessage("IOC OTPs data downloaded successfully.");
+  };
+
+  const handleDownloadReportCsv = () => {
+    let headers = [];
+    let rows = [];
+    const filename = `Report_${activeReportTab}_${new Date().toISOString().split("T")[0]}.csv`;
+
+    if (activeReportTab === "sales") {
+      const items = salesReportData?.salesList || [];
+      if (!items.length) {
+        setErrorMessage("No sales data to export.");
+        return;
+      }
+      headers = ["Sale ID", "Date", "Customer Name", "Consumer #", "Driver", "Items", "Total Qty", "Amount (₹)", "Payment Method", "Settlement", "Status"];
+      rows = items.map((r) => [
+        r.id,
+        r.date_formatted || "",
+        r.customer_name || "-",
+        r.consumer_number || "-",
+        r.driver_name || "-",
+        r.items || "14.2 KG Domestic",
+        r.total_qty || 1,
+        Number(r.total_amount || 0).toFixed(2),
+        r.payment_method || "-",
+        r.settlement || "Direct",
+        r.status || "-",
+      ]);
+    } else if (activeReportTab === "movement") {
+      const connItems = (movementReportData?.newConnections || []).map((c) => [
+        c.date_formatted || "",
+        "New Connection",
+        c.customer_name || "-",
+        c.consumer_number || "-",
+        `₹ ${c.total_amount || 0} - ${c.product_details || "Standard"}`,
+        c.payment_status || "COMPLETED",
+      ]);
+      const trItems = (movementReportData?.transfers || []).map((t) => [
+        t.date_formatted || "",
+        "Transfer Out",
+        t.old_customer_name || "-",
+        t.consumer_number || "-",
+        `To: ${t.new_agency_name || "New Agency"} (${t.reason || "-"})`,
+        t.status || "-",
+      ]);
+      const ncItems = (movementReportData?.nameChanges || []).map((n) => [
+        n.date_formatted || "",
+        "Name Change",
+        `${n.old_name_snapshot} -> ${n.new_name_requested}`,
+        n.consumer_number || "-",
+        `Fee: ₹ ${n.service_fee || 0}`,
+        n.status || "-",
+      ]);
+      rows = [...connItems, ...trItems, ...ncItems];
+      if (!rows.length) {
+        setErrorMessage("No customer movement data to export.");
+        return;
+      }
+      headers = ["Date", "Movement Type", "Customer Name / Details", "Consumer #", "Details / Remarks", "Status"];
+    } else if (activeReportTab === "complaints") {
+      const items = complaintsReportData?.complaintsList || [];
+      if (!items.length) {
+        setErrorMessage("No complaints data to export.");
+        return;
+      }
+      headers = ["Complaint #", "Date", "Customer Name", "Consumer #", "Category", "Description", "Priority", "Assigned Driver", "Status"];
+      rows = items.map((r) => [
+        r.complaint_number || r.id,
+        r.date_formatted || "",
+        r.customer_name || "-",
+        r.consumer_number || "-",
+        r.category || "-",
+        r.description || "-",
+        r.priority || "-",
+        r.assigned_driver || "-",
+        r.status || "-",
+      ]);
+    } else if (activeReportTab === "otp") {
+      const items = otpReportData?.otpsList || [];
+      if (!items.length) {
+        setErrorMessage("No OTP data to export.");
+        return;
+      }
+      headers = ["Date", "Driver", "Customer", "Consumer #", "Item", "Quantity", "Settlement", "OTP", "Status"];
+      rows = items.map((r) => [
+        r.date_formatted || "",
+        r.driver_name || "-",
+        r.customer_name || "-",
+        r.consumer_number || "-",
+        r.item_name || "14.2 KG Domestic",
+        r.quantity || 1,
+        r.settlement || "Direct",
+        r.otp || "-",
+        r.status || "-",
+      ]);
+    }
+
+    const csvContent = [
+      headers.map((h) => `"${h}"`).join(","),
+      ...rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setSuccessMessage("Report exported successfully.");
   };
 
   const handleClearCustomerSelection = () => {
@@ -1966,39 +2269,52 @@ function Dashboard({ onSignOut }) {
         {activeMenu === "New Connection" ? (
           <section className="new-connection-grid">
             <article className="new-connection-form-card">
-              <h3>New Connection Form</h3>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                <h3 style={{ margin: 0 }}>Add New Customer / Connection Applicant</h3>
+                <span className="payment-chip pending" style={{ fontSize: "0.8rem", textTransform: "uppercase" }}>New Applicant Mode</span>
+              </div>
 
               <div className="new-connection-fields two-column">
                 <div>
-                  <label>Customer Name *</label>
-                  <div className="autosuggest-wrap">
-                    <input name="customerName" value={newConnectionForm.customerName} onChange={handleConnectionCustomerNameChange} />
-                    {activeSuggestionField === "new-connection" && customerNameSuggestions.length ? (
-                      <div className="autosuggest-dropdown">
-                        {customerNameSuggestions.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className="autosuggest-item"
-                            onClick={() => handleSelectSuggestedCustomer("new-connection", item)}
-                          >
-                            <strong>{item.name || "Customer"}</strong>
-                            <span>{item.consumer_number || "-"} • {item.phone || "-"}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
+                  <label>Applicant Full Name *</label>
+                  <input
+                    name="customerName"
+                    value={newConnectionForm.customerName}
+                    onChange={handleConnectionInputChange}
+                    placeholder="Enter applicant full name"
+                  />
                 </div>
                 <div>
                   <label>Mobile Number *</label>
-                  <input name="mobileNumber" value={newConnectionForm.mobileNumber} onChange={handleConnectionInputChange} />
+                  <input
+                    name="mobileNumber"
+                    value={newConnectionForm.mobileNumber}
+                    onChange={handleConnectionInputChange}
+                    placeholder="10-digit mobile number"
+                  />
                 </div>
               </div>
 
-              <div className="new-connection-fields">
-                <label>Address</label>
-                <input name="address" value={newConnectionForm.address} onChange={handleConnectionInputChange} />
+              <div className="new-connection-fields two-column">
+                <div>
+                  <label>Consumer Number / ID </label>
+                  <input
+                    name="consumerNumber"
+                    value={newConnectionForm.consumerNumber}
+                    onChange={handleConnectionInputChange}
+                    placeholder="e.g. 7000000000123456 (or leave empty to auto-generate)"
+                  />
+                  <p className="field-hint">If applicant already has an assigned Consumer ID, enter it here. Otherwise, an ID will be generated upon submission.</p>
+                </div>
+                <div>
+                  <label>Applicant Address *</label>
+                  <input
+                    name="address"
+                    value={newConnectionForm.address}
+                    onChange={handleConnectionInputChange}
+                    placeholder="Full residential or commercial address"
+                  />
+                </div>
               </div>
 
               <div className="new-connection-fields">
@@ -2201,37 +2517,66 @@ function Dashboard({ onSignOut }) {
         {activeMenu === "Transfer" ? (
           <section className="transfer-grid">
             <article className="transfer-form-card">
-              <h3>Old Customer Details</h3>
+              <h3>Existing Customer Details</h3>
 
-              <div className="transfer-fields two-column">
-                <div>
-                  <label>Consumer Number *</label>
-                  <input name="consumerNumber" value={transferForm.consumerNumber} onChange={handleTransferInputChange} placeholder="LPG-00012" />
-                </div>
-                <div>
-                  <label>Existing Name</label>
-                  <div className="autosuggest-wrap">
-                    <input name="existingName" value={transferForm.existingName} onChange={handleTransferExistingNameChange} placeholder="Type existing customer name" />
-                    {activeSuggestionField === "transfer-existing" && customerNameSuggestions.length ? (
-                      <div className="autosuggest-dropdown">
-                        {customerNameSuggestions.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className="autosuggest-item"
-                            onClick={() => handleSelectSuggestedCustomer("transfer-existing", item)}
-                          >
-                            <strong>{item.name || "Customer"}</strong>
-                            <span>{item.consumer_number || "-"} • {item.phone || "-"}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
+              <div className="transfer-fields">
+                <label>Consumer Number *</label>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <input
+                    name="consumerNumber"
+                    value={transferForm.consumerNumber}
+                    onChange={handleTransferInputChange}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); triggerTransferLookup(); } }}
+                    placeholder="Enter Consumer Number (e.g. 7000000000965566 or LPG-00012)"
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={triggerTransferLookup}
+                    disabled={transferLookupLoading || !transferForm.consumerNumber.trim()}
+                  >
+                    {transferLookupLoading ? "Searching..." : "🔍 Search"}
+                  </button>
                 </div>
               </div>
 
-              {transferLookupLoading ? <p className="muted">Loading existing customer details...</p> : null}
+              {transferLookupLoading ? <p className="muted">Looking up customer records...</p> : null}
+
+              {transferForm.existingCustomerId ? (
+                <div className="loaded-customer-card" style={{ marginBottom: "1.25rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <h4 style={{ margin: 0, color: "#166534" }}>✓ Existing Customer Verified</h4>
+                    <span className="payment-chip paid">Ready for Transfer</span>
+                  </div>
+                  <div className="customer-profile-grid" style={{ marginTop: "0.75rem" }}>
+                    <div>
+                      <label>Customer Name</label>
+                      <p><strong>{transferForm.existingName}</strong></p>
+                    </div>
+                    <div>
+                      <label>Consumer Number</label>
+                      <p>{transferForm.consumerNumber}</p>
+                    </div>
+                    <div>
+                      <label>Mobile Number</label>
+                      <p>{transferForm.existingCustomerPhone || "-"}</p>
+                    </div>
+                    <div>
+                      <label>Registered Address</label>
+                      <p>{transferForm.existingCustomerAddress || "Address on record"}</p>
+                    </div>
+                    <div>
+                      <label>Active Cylinder / Products</label>
+                      <p>{transferForm.existingProductDetails || "14.2 KG Domestic"}</p>
+                    </div>
+                    <div>
+                      <label>Deposit Liability</label>
+                      <p>₹ {Number(transferForm.depositLiability || 0).toFixed(2)}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               <h3>New Agency Details</h3>
 
@@ -2367,46 +2712,108 @@ function Dashboard({ onSignOut }) {
         {activeMenu === "Name Change" ? (
           <section className="name-change-grid">
             <article className="name-change-form-card">
+              <h3>Customer Name Change Request</h3>
+
+              <div className="name-change-fields">
+                <label>Consumer Number *</label>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <input
+                    name="consumerNumber"
+                    value={nameChangeForm.consumerNumber}
+                    onChange={handleNameChangeInputChange}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); triggerNameChangeLookup(); } }}
+                    placeholder="Enter Consumer Number (e.g. 7000000000965566 or LPG-00012)"
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={triggerNameChangeLookup}
+                    disabled={nameChangeLookupLoading || !nameChangeForm.consumerNumber.trim()}
+                  >
+                    {nameChangeLookupLoading ? "Searching..." : "🔍 Search"}
+                  </button>
+                </div>
+              </div>
+
+              {nameChangeLookupLoading ? <p className="muted">Looking up customer records...</p> : null}
+
+              {nameChangeForm.existingCustomerId ? (
+                <div className="loaded-customer-card" style={{ marginBottom: "1.25rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <h4 style={{ margin: 0, color: "#166534" }}>✓ Registered Customer Verified</h4>
+                    <span className="payment-chip paid">Found</span>
+                  </div>
+                  <div className="customer-profile-grid" style={{ marginTop: "0.75rem" }}>
+                    <div>
+                      <label>Current Registered Name</label>
+                      <p><strong>{nameChangeForm.existingName}</strong></p>
+                    </div>
+                    <div>
+                      <label>Consumer Number</label>
+                      <p>{nameChangeForm.consumerNumber}</p>
+                    </div>
+                    <div>
+                      <label>Phone</label>
+                      <p>{nameChangeForm.existingCustomerPhone || "-"}</p>
+                    </div>
+                    <div>
+                      <label>Current Registered Address</label>
+                      <p>{nameChangeForm.existingCustomerAddress || "Address on record"}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="name-change-fields two-column">
                 <div>
-                  <label>Consumer Number *</label>
-                  <input name="consumerNumber" value={nameChangeForm.consumerNumber} onChange={handleNameChangeInputChange} placeholder="LPG-00012" />
+                  <label>New Name Requested *</label>
+                  <input
+                    name="newName"
+                    value={nameChangeForm.newName}
+                    onChange={handleNameChangeInputChange}
+                    placeholder="Enter new legal / applicant name"
+                  />
                 </div>
                 <div>
                   <label>Service Fee (₹)</label>
-                  <input name="serviceFee" type="number" min="0" step="0.01" value={nameChangeForm.serviceFee} onChange={handleNameChangeInputChange} />
+                  <input
+                    name="serviceFee"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={nameChangeForm.serviceFee}
+                    onChange={handleNameChangeInputChange}
+                  />
                 </div>
               </div>
 
-              <div className="name-change-fields two-column">
-                <div>
-                  <label>Existing Name</label>
-                  <div className="autosuggest-wrap">
-                    <input name="existingName" value={nameChangeForm.existingName} onChange={handleNameChangeExistingNameChange} placeholder="Type existing name" />
-                    {activeSuggestionField === "name-change-existing" && customerNameSuggestions.length ? (
-                      <div className="autosuggest-dropdown">
-                        {customerNameSuggestions.map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className="autosuggest-item"
-                            onClick={() => handleSelectSuggestedCustomer("name-change-existing", item)}
-                          >
-                            <strong>{item.name || "Customer"}</strong>
-                            <span>{item.consumer_number || "-"} • {item.phone || "-"}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
+              <div className="name-change-fields">
+                <label className="checkbox-field" style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    name="isSameAddress"
+                    checked={nameChangeForm.isSameAddress}
+                    onChange={(e) => setNameChangeForm((prev) => ({ ...prev, isSameAddress: e.target.checked }))}
+                  />
+                  <span><strong>Same Address</strong> (Retain current registered address)</span>
+                </label>
+                {nameChangeForm.isSameAddress ? (
+                  <p className="field-hint" style={{ color: "#2e7d32", marginTop: "4px" }}>
+                    ✓ Current registered address will be retained without re-entering: <em>{nameChangeForm.existingCustomerAddress || "Retained from customer record"}</em>
+                  </p>
+                ) : (
+                  <div style={{ marginTop: "0.6rem" }}>
+                    <label>New Registered Address *</label>
+                    <input
+                      name="newAddress"
+                      value={nameChangeForm.newAddress}
+                      onChange={(e) => setNameChangeForm((prev) => ({ ...prev, newAddress: e.target.value }))}
+                      placeholder="Enter new customer address"
+                    />
                   </div>
-                </div>
-                <div>
-                  <label>New Name *</label>
-                  <input name="newName" value={nameChangeForm.newName} onChange={handleNameChangeInputChange} placeholder="Enter new name" />
-                </div>
+                )}
               </div>
-
-              {nameChangeLookupLoading ? <p className="muted">Loading customer details...</p> : null}
 
               <div className="name-change-fields">
                 <label>Supporting Document *</label>
@@ -2448,16 +2855,81 @@ function Dashboard({ onSignOut }) {
 
         {activeMenu === "PR Penalty" ? (
           <section className="pr-penalty-grid">
+            <div style={{ gridColumn: "1 / -1" }}>
+              <div className="pr-stock-banner" style={{ display: "flex", gap: "1rem", marginBottom: "0.5rem" }}>
+                <div className="pr-stock-chip normal" style={{ flex: 1, padding: "1rem 1.25rem", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px" }}>
+                  <div style={{ fontSize: "0.8rem", color: "#166534", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em" }}>Normal PR Stock (Sound / Available)</div>
+                  <div style={{ fontSize: "1.75rem", fontWeight: 700, color: "#14532d", marginTop: "4px" }}>{prStockSummary.normalPrStock} <span style={{ fontSize: "1rem", fontWeight: 500 }}>units</span></div>
+                  <div style={{ fontSize: "0.75rem", color: "#15803d", marginTop: "2px" }}>Decrements by 1 on issue / replacement</div>
+                </div>
+                <div className="pr-stock-chip defective" style={{ flex: 1, padding: "1rem 1.25rem", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "10px" }}>
+                  <div style={{ fontSize: "0.8rem", color: "#991b1b", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em" }}>Defective PR Stock (Returned / Scrap)</div>
+                  <div style={{ fontSize: "1.75rem", fontWeight: 700, color: "#7f1d1d", marginTop: "4px" }}>{prStockSummary.defectivePrStock} <span style={{ fontSize: "1rem", fontWeight: 500 }}>units</span></div>
+                  <div style={{ fontSize: "0.75rem", color: "#b91c1c", marginTop: "2px" }}>Increments by 1 on defective customer return</div>
+                </div>
+              </div>
+            </div>
+
             <article className="pr-penalty-form-card">
-              <div className="pr-penalty-fields two-column">
+              <h3>PR Stock Movement & Penalty Record</h3>
+
+              <div className="pr-penalty-fields" style={{ background: "#fbfaf8", padding: "0.85rem", borderRadius: "8px", border: "1px solid #ede8e3" }}>
+                <label style={{ fontWeight: 600, color: "#1f1b18" }}>Movement / Transaction Type *</label>
+                <div style={{ display: "flex", gap: "1.5rem", marginTop: "0.4rem" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name="transactionType"
+                      value="REPLACEMENT"
+                      checked={prPenaltyForm.transactionType === "REPLACEMENT"}
+                      onChange={() => setPrPenaltyForm((prev) => ({
+                        ...prev,
+                        transactionType: "REPLACEMENT",
+                        penaltyReason: "Defective PR replacement",
+                        penaltyAmount: "0"
+                      }))}
+                    />
+                    <span><strong>PR Replacement</strong> (Customer returned defective PR)</span>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name="transactionType"
+                      value="PENALTY"
+                      checked={prPenaltyForm.transactionType === "PENALTY"}
+                      onChange={() => setPrPenaltyForm((prev) => ({
+                        ...prev,
+                        transactionType: "PENALTY",
+                        penaltyReason: "Lost PR / Penalty Fee",
+                        penaltyAmount: "150"
+                      }))}
+                    />
+                    <span><strong>Lost PR / Penalty Fee</strong> (Regulator missing / damaged)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="pr-penalty-fields two-column" style={{ marginTop: "0.75rem" }}>
                 <div>
                   <label>Consumer Number *</label>
-                  <input
-                    name="consumerNumber"
-                    value={prPenaltyForm.consumerNumber}
-                    onChange={handlePrPenaltyInputChange}
-                    placeholder="LPG-00004"
-                  />
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <input
+                      name="consumerNumber"
+                      value={prPenaltyForm.consumerNumber}
+                      onChange={handlePrPenaltyInputChange}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); triggerPenaltyLookup(); } }}
+                      placeholder="LPG-00004 or 7000..."
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      onClick={triggerPenaltyLookup}
+                      disabled={prPenaltyLookupLoading || !prPenaltyForm.consumerNumber.trim()}
+                    >
+                      {prPenaltyLookupLoading ? "..." : "🔍"}
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label>Customer Name *</label>
@@ -2489,19 +2961,32 @@ function Dashboard({ onSignOut }) {
 
               {prPenaltyLookupLoading ? <p className="muted">Looking up customer...</p> : null}
 
-              <div className="pr-penalty-fields">
-                <label>Penalty Reason *</label>
-                <input
-                  name="penaltyReason"
-                  value={prPenaltyForm.penaltyReason}
-                  onChange={handlePrPenaltyInputChange}
-                  placeholder="Enter penalty reason"
-                />
+              <div className="pr-penalty-fields two-column">
+                <div>
+                  <label>Reason / Description *</label>
+                  <input
+                    name="penaltyReason"
+                    value={prPenaltyForm.penaltyReason}
+                    onChange={handlePrPenaltyInputChange}
+                    placeholder="Enter reason"
+                  />
+                </div>
+                <div>
+                  <label>Quantity *</label>
+                  <input
+                    name="quantity"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={prPenaltyForm.quantity || "1"}
+                    onChange={handlePrPenaltyInputChange}
+                  />
+                </div>
               </div>
 
               <div className="pr-penalty-fields pr-penalty-amount-row">
                 <div>
-                  <label>Penalty Amount (₹)</label>
+                  <label>Amount / Penalty Fee (₹)</label>
                   <input
                     name="penaltyAmount"
                     type="number"
@@ -2510,6 +2995,11 @@ function Dashboard({ onSignOut }) {
                     value={prPenaltyForm.penaltyAmount}
                     onChange={handlePrPenaltyInputChange}
                   />
+                  <p className="field-hint">
+                    {prPenaltyForm.transactionType === "REPLACEMENT"
+                      ? "₹0 for warranty / standard replacement. Normal PR stock will decrease by 1, Defective PR will increase by 1."
+                      : "Normal PR stock will decrease by 1 upon issuing new PR to customer."}
+                  </p>
                 </div>
               </div>
 
@@ -2520,7 +3010,11 @@ function Dashboard({ onSignOut }) {
                   disabled={prPenaltySubmitting}
                   onClick={handleRecordPenalty}
                 >
-                  {prPenaltySubmitting ? "Recording..." : "Record Penalty"}
+                  {prPenaltySubmitting
+                    ? "Recording..."
+                    : prPenaltyForm.transactionType === "REPLACEMENT"
+                    ? "Record PR Replacement & Update Stock"
+                    : "Record Lost PR Penalty & Issue"}
                 </button>
               </div>
             </article>
@@ -2673,6 +3167,9 @@ function Dashboard({ onSignOut }) {
                       <th>Driver</th>
                       <th>Customer</th>
                       <th>Consumer #</th>
+                      <th>Item Name</th>
+                      <th>Qty</th>
+                      <th>Settlement</th>
                       <th>Category</th>
                       <th>OTP</th>
                       <th>Status</th>
@@ -2682,13 +3179,13 @@ function Dashboard({ onSignOut }) {
                   <tbody>
                     {iocOtpsLoading ? (
                       <tr>
-                        <td colSpan={8}>Loading OTPs...</td>
+                        <td colSpan={11}>Loading OTPs...</td>
                       </tr>
                     ) : null}
 
                     {!iocOtpsLoading && !iocOtps.length ? (
                       <tr>
-                        <td colSpan={8}>No OTPs found.</td>
+                        <td colSpan={11}>No OTPs found.</td>
                       </tr>
                     ) : null}
 
@@ -2701,6 +3198,13 @@ function Dashboard({ onSignOut }) {
                               <td>{item.driver_name || "-"}</td>
                               <td>{item.customer_name || "-"}</td>
                               <td>{item.consumer_number || "-"}</td>
+                              <td><strong>{item.item_name || "14.2 KG Domestic"}</strong></td>
+                              <td>{item.quantity || 1}</td>
+                              <td>
+                                <span className={`settlement-badge ${String(item.settlement || "Direct").toLowerCase()}`}>
+                                  {item.settlement || "Direct"}
+                                </span>
+                              </td>
                               <td>{item.category || "-"}</td>
                               <td>
                                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -2925,7 +3429,437 @@ function Dashboard({ onSignOut }) {
           </section>
         ) : null}
 
-        {activeMenu !== "Dashboard" && activeMenu !== "Complaints" && activeMenu !== "New Connection" && activeMenu !== "Transfer" && activeMenu !== "Name Change" && activeMenu !== "PR Penalty" && activeMenu !== "IOC OTPs" && activeMenu !== "Customers" ? (
+        {activeMenu === "Reports" ? (
+          <section className="reports-section" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+            <div className="reports-filter-bar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#ffffff", padding: "1rem 1.25rem", borderRadius: "10px", border: "1px solid #e8e4df", flexWrap: "wrap", gap: "1rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#6c635b", marginRight: "0.25rem" }}>Timeframe:</span>
+                <button
+                  type="button"
+                  className={`reports-filter-btn ${reportsTimeframe === "day" ? "active" : ""}`}
+                  onClick={() => setReportsTimeframe("day")}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  className={`reports-filter-btn ${reportsTimeframe === "week" ? "active" : ""}`}
+                  onClick={() => setReportsTimeframe("week")}
+                >
+                  This Week
+                </button>
+                <button
+                  type="button"
+                  className={`reports-filter-btn ${reportsTimeframe === "month" ? "active" : ""}`}
+                  onClick={() => setReportsTimeframe("month")}
+                >
+                  This Month
+                </button>
+                <button
+                  type="button"
+                  className={`reports-filter-btn ${reportsTimeframe === "custom" ? "active" : ""}`}
+                  onClick={() => setReportsTimeframe("custom")}
+                >
+                  Custom Range
+                </button>
+
+                {reportsTimeframe === "custom" ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginLeft: "0.5rem" }}>
+                    <input
+                      type="date"
+                      value={reportsStartDate}
+                      onChange={(e) => setReportsStartDate(e.target.value)}
+                      style={{ padding: "0.4rem 0.6rem", borderRadius: "6px", border: "1px solid #d5cfc9", fontSize: "0.85rem" }}
+                    />
+                    <span style={{ color: "#7b7269", fontSize: "0.85rem" }}>to</span>
+                    <input
+                      type="date"
+                      value={reportsEndDate}
+                      onChange={(e) => setReportsEndDate(e.target.value)}
+                      style={{ padding: "0.4rem 0.6rem", borderRadius: "6px", border: "1px solid #d5cfc9", fontSize: "0.85rem" }}
+                    />
+                  </div>
+                ) : null}
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  className="primary-btn"
+                  onClick={handleDownloadReportCsv}
+                  title="Export current report to CSV"
+                >
+                  ↓ Download Report (CSV)
+                </button>
+              </div>
+            </div>
+
+            <div className="reports-nav-bar" style={{ display: "flex", gap: "0.5rem", borderBottom: "2px solid #e8e4df" }}>
+              <button
+                type="button"
+                className={`reports-nav-tab ${activeReportTab === "sales" ? "active" : ""}`}
+                onClick={() => setActiveReportTab("sales")}
+              >
+                📊 Sales Report
+              </button>
+              <button
+                type="button"
+                className={`reports-nav-tab ${activeReportTab === "movement" ? "active" : ""}`}
+                onClick={() => setActiveReportTab("movement")}
+              >
+                🔄 Customer Movement
+              </button>
+              <button
+                type="button"
+                className={`reports-nav-tab ${activeReportTab === "complaints" ? "active" : ""}`}
+                onClick={() => setActiveReportTab("complaints")}
+              >
+                🛠️ Complaints Report
+              </button>
+              <button
+                type="button"
+                className={`reports-nav-tab ${activeReportTab === "otp" ? "active" : ""}`}
+                onClick={() => setActiveReportTab("otp")}
+              >
+                🔐 OTP Verification
+              </button>
+            </div>
+
+            {reportsLoading ? (
+              <div className="reports-table-card">
+                <p className="muted" style={{ padding: "2rem", textAlign: "center" }}>Loading report data...</p>
+              </div>
+            ) : null}
+
+            {!reportsLoading && activeReportTab === "sales" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div className="reports-kpi-grid">
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Total Cylinders Sold</span>
+                    <strong className="reports-kpi-value">{salesReportData?.summary?.total_cylinders || 0}</strong>
+                  </article>
+                  {/* <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Total Revenue</span>
+                    <strong className="reports-kpi-value">₹ {Number(salesReportData?.summary?.total_amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                  </article> */}
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Direct Settlements</span>
+                    <strong className="reports-kpi-value" style={{ color: "#059669" }}>₹ {Number(salesReportData?.summary?.direct_amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                  </article>
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Indirect / Cash Settlements</span>
+                    <strong className="reports-kpi-value" style={{ color: "#d97706" }}>₹ {Number(salesReportData?.summary?.indirect_amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                  </article>
+                </div>
+
+                <div className="reports-table-card">
+                  <h4 style={{ margin: 0 }}>Sales Transactions ({salesReportData?.filter || "Today"})</h4>
+                  <div className="ioc-table-wrap">
+                    <table className="ioc-table">
+                      <thead>
+                        <tr>
+                          <th>Sale ID</th>
+                          <th>Date / Time</th>
+                          <th>Customer</th>
+                          <th>Consumer #</th>
+                          <th>Items</th>
+                          <th>Qty</th>
+                          <th>Amount</th>
+                          <th>Mode</th>
+                          <th>Settlement</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!salesReportData?.salesList?.length ? (
+                          <tr><td colSpan={10} style={{ textAlign: "center", padding: "1.5rem" }}>No sales records found for this period.</td></tr>
+                        ) : (
+                          salesReportData.salesList.map((s) => (
+                            <tr key={s.id}>
+                              <td>#{s.id}</td>
+                              <td>{s.date_formatted}</td>
+                              <td>{s.customer_name || "-"}</td>
+                              <td>{s.consumer_number || "-"}</td>
+                              <td>{s.items || "14.2 KG Domestic"}</td>
+                              <td>{s.total_qty || 1}</td>
+                              <td><strong>₹ {Number(s.total_amount || 0).toFixed(2)}</strong></td>
+                              <td><span className="payment-chip info">{s.payment_method || "CASH"}</span></td>
+                              <td>
+                                <span className={`settlement-badge ${String(s.settlement || "Direct").toLowerCase()}`}>
+                                  {s.settlement || "Direct"}
+                                </span>
+                              </td>
+                              <td><span className="payment-chip paid">{s.status || "DELIVERED"}</span></td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {!reportsLoading && activeReportTab === "movement" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div className="reports-kpi-grid">
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Total Movements</span>
+                    <strong className="reports-kpi-value">{movementReportData?.summary?.totalMovementCount || 0}</strong>
+                  </article>
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">New Connections</span>
+                    <strong className="reports-kpi-value" style={{ color: "#2563eb" }}>{movementReportData?.summary?.newConnectionsCount || 0}</strong>
+                  </article>
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Transfers Out</span>
+                    <strong className="reports-kpi-value" style={{ color: "#d97706" }}>{movementReportData?.summary?.transfersCount || 0}</strong>
+                  </article>
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Name Changes</span>
+                    <strong className="reports-kpi-value" style={{ color: "#7c3aed" }}>{movementReportData?.summary?.nameChangesCount || 0}</strong>
+                  </article>
+                </div>
+
+                <div className="reports-table-card">
+                  <h4 style={{ margin: 0 }}>New Connections ({movementReportData?.filter || "Today"})</h4>
+                  <div className="ioc-table-wrap">
+                    <table className="ioc-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Customer</th>
+                          <th>Phone</th>
+                          <th>Consumer #</th>
+                          <th>Package</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!movementReportData?.newConnections?.length ? (
+                          <tr><td colSpan={7} style={{ textAlign: "center", padding: "1.2rem" }}>No new connections registered in this period.</td></tr>
+                        ) : (
+                          movementReportData.newConnections.map((c) => (
+                            <tr key={c.id}>
+                              <td>{c.date_formatted}</td>
+                              <td><strong>{c.customer_name}</strong></td>
+                              <td>{c.phone || "-"}</td>
+                              <td>{c.consumer_number || "-"}</td>
+                              <td>{c.product_details || "Standard Connection"}</td>
+                              <td>₹ {Number(c.total_amount || 0).toFixed(2)}</td>
+                              <td><span className="payment-chip paid">{c.payment_status || "COMPLETED"}</span></td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="reports-table-card">
+                  <h4 style={{ margin: 0 }}>Transfers ({movementReportData?.filter || "Today"})</h4>
+                  <div className="ioc-table-wrap">
+                    <table className="ioc-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Customer</th>
+                          <th>Consumer #</th>
+                          <th>Target Agency</th>
+                          <th>Deposit Liability</th>
+                          <th>Reason</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!movementReportData?.transfers?.length ? (
+                          <tr><td colSpan={7} style={{ textAlign: "center", padding: "1.2rem" }}>No transfers initiated in this period.</td></tr>
+                        ) : (
+                          movementReportData.transfers.map((t) => (
+                            <tr key={t.id}>
+                              <td>{t.date_formatted}</td>
+                              <td><strong>{t.old_customer_name}</strong></td>
+                              <td>{t.consumer_number || "-"}</td>
+                              <td>{t.new_agency_name || "New Agency"}</td>
+                              <td>₹ {Number(t.deposit_liability || 0).toFixed(2)}</td>
+                              <td>{t.reason || "-"}</td>
+                              <td><span className="payment-chip pending">{t.status || "PENDING"}</span></td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="reports-table-card">
+                  <h4 style={{ margin: 0 }}>Name Changes ({movementReportData?.filter || "Today"})</h4>
+                  <div className="ioc-table-wrap">
+                    <table className="ioc-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Consumer #</th>
+                          <th>Previous Name</th>
+                          <th>New Name Requested</th>
+                          <th>Fee</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!movementReportData?.nameChanges?.length ? (
+                          <tr><td colSpan={6} style={{ textAlign: "center", padding: "1.2rem" }}>No name changes in this period.</td></tr>
+                        ) : (
+                          movementReportData.nameChanges.map((nc) => (
+                            <tr key={nc.id}>
+                              <td>{nc.date_formatted}</td>
+                              <td>{nc.consumer_number || "-"}</td>
+                              <td>{nc.old_name_snapshot}</td>
+                              <td><strong>{nc.new_name_requested}</strong></td>
+                              <td>₹ {Number(nc.service_fee || 0).toFixed(2)}</td>
+                              <td><span className="payment-chip info">{nc.status || "PENDING"}</span></td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {!reportsLoading && activeReportTab === "complaints" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div className="reports-kpi-grid">
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Total Complaints</span>
+                    <strong className="reports-kpi-value">{complaintsReportData?.summary?.total || 0}</strong>
+                  </article>
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Resolved</span>
+                    <strong className="reports-kpi-value" style={{ color: "#059669" }}>{complaintsReportData?.summary?.resolved || 0}</strong>
+                  </article>
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Pending / In Progress</span>
+                    <strong className="reports-kpi-value" style={{ color: "#d97706" }}>{(complaintsReportData?.summary?.pending || 0) + (complaintsReportData?.summary?.in_progress || 0)}</strong>
+                  </article>
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Urgent / Leakage</span>
+                    <strong className="reports-kpi-value" style={{ color: "#dc2626" }}>{complaintsReportData?.summary?.urgent || 0}</strong>
+                  </article>
+                </div>
+
+                <div className="reports-table-card">
+                  <h4 style={{ margin: 0 }}>Complaints Log ({complaintsReportData?.filter || "Today"})</h4>
+                  <div className="ioc-table-wrap">
+                    <table className="ioc-table">
+                      <thead>
+                        <tr>
+                          <th>Complaint #</th>
+                          <th>Date</th>
+                          <th>Customer</th>
+                          <th>Consumer #</th>
+                          <th>Issue Category</th>
+                          <th>Description</th>
+                          <th>Driver Assigned</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!complaintsReportData?.complaintsList?.length ? (
+                          <tr><td colSpan={8} style={{ textAlign: "center", padding: "1.5rem" }}>No complaints logged for this period.</td></tr>
+                        ) : (
+                          complaintsReportData.complaintsList.map((c) => (
+                            <tr key={c.id}>
+                              <td>#{c.complaint_number || c.id}</td>
+                              <td>{c.date_formatted}</td>
+                              <td><strong>{c.customer_name || "-"}</strong></td>
+                              <td>{c.consumer_number || "-"}</td>
+                              <td><span className={`payment-chip ${c.category === "Leakage" ? "unpaid" : "info"}`}>{c.category || "-"}</span></td>
+                              <td>{c.description || "-"}</td>
+                              <td>{c.assigned_driver || "Unassigned"}</td>
+                              <td><span className={`payment-chip ${c.status === "RESOLVED" ? "paid" : "pending"}`}>{c.status}</span></td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {!reportsLoading && activeReportTab === "otp" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div className="reports-kpi-grid">
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Total OTPs</span>
+                    <strong className="reports-kpi-value">{otpReportData?.summary?.total_otps || 0}</strong>
+                  </article>
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Sent to IOC</span>
+                    <strong className="reports-kpi-value" style={{ color: "#059669" }}>{otpReportData?.summary?.sent_otps || 0}</strong>
+                  </article>
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Pending</span>
+                    <strong className="reports-kpi-value" style={{ color: "#d97706" }}>{otpReportData?.summary?.pending_otps || 0}</strong>
+                  </article>
+                  <article className="reports-kpi-card">
+                    <span className="reports-kpi-label">Verification Rate</span>
+                    <strong className="reports-kpi-value" style={{ color: "#2563eb" }}>{otpReportData?.summary?.verificationRate || "0%"}</strong>
+                  </article>
+                </div>
+
+                <div className="reports-table-card">
+                  <h4 style={{ margin: 0 }}>OTP Verifications ({otpReportData?.filter || "Today"})</h4>
+                  <div className="ioc-table-wrap">
+                    <table className="ioc-table">
+                      <thead>
+                        <tr>
+                          <th>Date / Time</th>
+                          <th>Driver</th>
+                          <th>Customer</th>
+                          <th>Consumer #</th>
+                          <th>Item Name</th>
+                          <th>Qty</th>
+                          <th>Settlement</th>
+                          <th>OTP</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!otpReportData?.otpsList?.length ? (
+                          <tr><td colSpan={9} style={{ textAlign: "center", padding: "1.5rem" }}>No OTP records found for this period.</td></tr>
+                        ) : (
+                          otpReportData.otpsList.map((o) => (
+                            <tr key={o.id}>
+                              <td>{o.date_formatted}</td>
+                              <td>{o.driver_name || "-"}</td>
+                              <td><strong>{o.customer_name || "-"}</strong></td>
+                              <td>{o.consumer_number || "-"}</td>
+                              <td>{o.item_name || "14.2 KG Domestic"}</td>
+                              <td>{o.quantity || 1}</td>
+                              <td>
+                                <span className={`settlement-badge ${String(o.settlement || "Direct").toLowerCase()}`}>
+                                  {o.settlement || "Direct"}
+                                </span>
+                              </td>
+                              <td><strong>{o.otp}</strong></td>
+                              <td><span className={`payment-chip ${o.status === "SENT" ? "paid" : "unpaid"}`}>{o.status}</span></td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {activeMenu !== "Dashboard" && activeMenu !== "Complaints" && activeMenu !== "New Connection" && activeMenu !== "Transfer" && activeMenu !== "Name Change" && activeMenu !== "PR Penalty" && activeMenu !== "IOC OTPs" && activeMenu !== "Customers" && activeMenu !== "Reports" ? (
           <section className="panel placeholder-panel">
             <p className="muted">{activeMenu} module will be connected next.</p>
           </section>

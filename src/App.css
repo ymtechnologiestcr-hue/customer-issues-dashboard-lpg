@@ -2164,3 +2164,174 @@ textarea {
     flex-wrap: wrap;
   }
 }
+
+/* Settlement Badges */
+.settlement-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.settlement-badge.direct {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+.settlement-badge.indirect {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+/* Loaded Customer Card */
+.loaded-customer-card {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 14px;
+  margin: 14px 0;
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+/* PR Stock Banner */
+.pr-stock-banner {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 1.5rem;
+}
+.pr-stock-chip {
+  flex: 1;
+  padding: 14px 18px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.pr-stock-chip.normal {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+.pr-stock-chip.defective {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+/* Operational Reports Styles */
+.reports-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 0.5rem 0;
+}
+
+.reports-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: #ffffff;
+  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  border: 1px solid #e8e4df;
+}
+
+.reports-timeframe-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.reports-pill-btn {
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid #dcd7d2;
+  background: #fdfcfb;
+  color: #4b453f;
+  font-size: 0.84rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.reports-pill-btn:hover {
+  background: #f5f2ee;
+  border-color: #cac4bd;
+}
+.reports-pill-btn.active {
+  background: #ff5f1f;
+  color: #ffffff;
+  border-color: #ff5f1f;
+  font-weight: 600;
+}
+
+.reports-nav-tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 2px solid #e8e4df;
+  padding-bottom: 0.1rem;
+}
+
+.reports-nav-tab {
+  padding: 0.65rem 1.2rem;
+  border: none;
+  background: none;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #6c635b;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: all 0.15s ease;
+}
+.reports-nav-tab:hover {
+  color: #ff5f1f;
+}
+.reports-nav-tab.active {
+  color: #ff5f1f;
+  border-bottom-color: #ff5f1f;
+}
+
+.reports-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.reports-kpi-card {
+  background: #ffffff;
+  border: 1px solid #e8e4df;
+  border-radius: 10px;
+  padding: 1rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.reports-kpi-label {
+  font-size: 0.8rem;
+  color: #7b7269;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.reports-kpi-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #1f1b18;
+}
+
+.reports-table-card {
+  background: #ffffff;
+  border: 1px solid #e8e4df;
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
