@@ -264,3 +264,37 @@ export const uploadBulkCustomers = async (file) => {
 
   return response.data;
 };
+
+export const fetchPrStockSummary = async () => {
+  const response = await api.get("/pr-penalties/stock-summary");
+  return response.data?.data || { normalPrStock: 0, defectivePrStock: 0 };
+};
+
+export const fetchSalesReport = async ({ timeframe = "day", startDate, endDate } = {}) => {
+  const response = await api.get("/reports/sales", {
+    params: { timeframe, startDate: startDate || undefined, endDate: endDate || undefined },
+  });
+  return response.data?.data || null;
+};
+
+export const fetchCustomerMovementReport = async ({ timeframe = "day", startDate, endDate } = {}) => {
+  const response = await api.get("/reports/customer-movement", {
+    params: { timeframe, startDate: startDate || undefined, endDate: endDate || undefined },
+  });
+  return response.data?.data || null;
+};
+
+export const fetchComplaintsReport = async ({ timeframe = "day", startDate, endDate } = {}) => {
+  const response = await api.get("/reports/complaints", {
+    params: { timeframe, startDate: startDate || undefined, endDate: endDate || undefined },
+  });
+  return response.data?.data || null;
+};
+
+export const fetchOtpVerificationReport = async ({ timeframe = "day", startDate, endDate } = {}) => {
+  const response = await api.get("/reports/otp-verification", {
+    params: { timeframe, startDate: startDate || undefined, endDate: endDate || undefined },
+  });
+  return response.data?.data || null;
+};
+
