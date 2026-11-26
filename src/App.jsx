@@ -35,6 +35,7 @@ import {
   fetchCustomerDirectory,
   fetchIocOtpSummary,
   fetchIocOtps,
+  fetchUserSettings,
   markOtpSent,
   AUTH_TOKEN_KEY,
   AUTH_USER_KEY,
@@ -309,7 +310,10 @@ const mapPenaltyLookup = (record) => {
   };
 };
 
-function Dashboard({ onSignOut }) {
+function Dashboard({ authUser, onSignOut }) {
+  const [fetchedAgencyName, setFetchedAgencyName] = useState("");
+  const knownAgencyName = authUser?.agency_name || authUser?.company_name || "";
+  const agencyName = knownAgencyName || fetchedAgencyName;
   const [activeMenu, setActiveMenu] = useState("Dashboard");
   const [view, setView] = useState("list");
   const [step, setStep] = useState(1);
@@ -786,6 +790,51 @@ function Dashboard({ onSignOut }) {
 
     load();
   }, [activeMenu]);
+
+  useEffect(() => {
+    let active = true;
+    if (knownAgencyName || !authUser?.id) return;
+
+    const loadAgencyName = async () => {
+      try {
+        const settings = await fetchUserSettings(authUser.id);
+        const fetchedName = settings?.agency_name || settings?.company_name || "";
+        if (!active || !fetchedName) return;
+        setFetchedAgencyName(fetchedName);
+        try {
+          const stored = readStoredUser();
+          if (stored) {
+            localStorage.setItem(
+              AUTH_USER_KEY,
+              JSON.stringify({ ...stored, agency_name: fetchedName })
+            );
+          }
+        } catch {
+          // Ignore storage write errors
+        }
+      } catch {
+        // Fallback cleanly if settings endpoint is unavailable
+      }
+    };
+
+    loadAgencyName();
+    return () => {
+      active = false;
+    };
+  }, [authUser?.id, knownAgencyName]);
+
+  useEffect(() => {
+    const handleStorage = () => {
+      const stored = readStoredUser();
+      const storedAgency = stored?.agency_name || stored?.company_name || "";
+      if (storedAgency) {
+        setFetchedAgencyName(storedAgency);
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -1741,8 +1790,13 @@ function Dashboard({ onSignOut }) {
       <aside className="sidebar">
         <div className="brand-head">
           <div className="brand-icon">L</div>
-          <div>
+          <div className="brand-info">
             <p className="brand-title">LPG Support</p>
+            {agencyName ? (
+              <p className="brand-agency" title={agencyName}>
+                {agencyName}
+              </p>
+            ) : null}
             <p className="brand-subtitle">Agency ERP</p>
           </div>
         </div>
@@ -3899,7 +3953,7 @@ function App() {
     return <Login onLoggedIn={handleLoggedIn} />;
   }
 
-  return <Dashboard onSignOut={handleSignOut} />;
+  return <Dashboard authUser={authUser} onSignOut={handleSignOut} />;
 }
 
 export default App;

@@ -42,6 +42,11 @@ export const verifyOtp = async (identifier, otp) => {
   return response.data;
 };
 
+export const fetchUserSettings = async (userId) => {
+  const response = await api.get(`/users/${userId}/settings`);
+  return response.data?.data || null;
+};
+
 export const fetchCustomers = async (search = "") => {
   const response = await api.get("/customer-complaints/customers", {
     params: {
